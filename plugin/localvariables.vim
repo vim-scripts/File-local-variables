@@ -1,80 +1,14 @@
 " localvariables.vim -- Set/let per-file-variables à la Emacs
-" @Author:      Thomas Link (samul@web.de)
+" @Author:      Thomas Link (samul AT web.de)
 " @License:     GPL (see http://www.gnu.org/licenses/gpl.txt)
 " @Created:     08-Dec-2003.
-" @Last Change: 18-Dez-2003.
-" @Revision: 183
-" 
-" Description:
-" This plugin tries to mimic Emacs's file local variables feature. File local 
-" variables are kept in a section in the last g:localVariablesRange 
-" (default=30) lines of a file (this variable also defines the maximum number 
-" of file local variables).
-"
-" The beginning of the section is marked with g:localVariablesBegText 
-" (default="Local Variables:"), the end with g:localVariablesEndText 
-" (default="End:"). These markers can be surrounded by arbitrary prefix and 
-" suffix markers. These (optional) prefixes and suffixes must be consistent 
-" for the whole section. The prefix and suffix are defined by the end-marker.
-" 
-" If a variable name contains a hyphen ("-"), the variable name will be 
-" translated into a buffer local variable in camel case, i.e. "comment-start" 
-" becomes "b:commentStart". A hyphendized variable's scope is always "b". If 
-" g:localVariablesDownCaseHyphenedNames (default=1) is true, then the variable 
-" name will be downcased first for compatibility reasons -- as (emacs) lisp is 
-" case insensitive. I.e., "COMMENT-START" becomes "b:commentStart", too.
-" 
-" You can use also variables with the prefix "g:localVariableX" for 
-" translating variable names without scope definitions. E.g., if 
-" g:localVariableXtabWidth is "&tabstop", then the line "tab-width:4" will set 
-" the option |tabstop| instead of "b:tabWidth".
-"
-" As an alternative, you can also define a function with the prefix 
-" "LocalVariableX" which will be called with the value as single argument.  
-" This provides a controlled way for executing commands, when loading/editing 
-" a file. By defining a function "LocalVariableXmode", this can be used to 
-" reuse Emacs's mode annotations for files that don't match the usual file 
-" patterns.
-"
-" A variable definition has the form (as regexp):
-" 
-"	((scope char:)?(variable|special name)|hyphened name):value
-" 
-" If no scope character is given, the variable is buffer local ("b"-scope).
-"
-" If the scope character is "&", |set| will be used to set the variable.
-" 
-" If the scope is ":", the variable name is interpreted as a special name. At 
-" the moment of writing, there is one :-) *special* name known:
-" 
-" - execute :: If g:localVariablesAllowExec is true, the value-part will be 
-"   evaluated using |execute|. The value of g:localVariablesAllowExec can't be 
-"   changed by this script. (The first 4 letters of "execute" are
-"   essential.)
-" 
-" Example: Put something like this at the end of a file.)
-" ### Local Variables: ###
-" ### b:variable1:1 ###
-" ### g:variable2:"2" ###
-" ### variable3:"three" ###
-" ### tab-width:4 ###
-" ### ::exec:echo "Got it!" ###
-" ### End: ###
-" 
-" Usage:
-" Put this file into your plugin directory and insert something like this into 
-" your .vimrc:
-" 
-" 	autocmd BufReadPost * call LocalVariablesCheck()
-" 	
-" Or rather:
-" 
-" 	autocmd BufEnter    * call LocalVariablesCheck()
-" 
-" When calling LocalVariablesCheck(), the buffer will only be scanned once.  
-" Force an re-evaluation of file local variables by calling 
-" LocalVariablesReCheck().
-" 
+" @Last Change: 14-Mär-2004.
+" @Revision: 2.0.26
+
+if &cp || exists("s:loaded_localvariables")
+    finish
+endif
+let s:loaded_localvariables = 1
 
 fun! <SID>ConditionalLet(var,value)
     if !exists(a:var)
@@ -82,11 +16,62 @@ fun! <SID>ConditionalLet(var,value)
     endif
 endfun
 
-call <SID>ConditionalLet("g:localVariablesRange",     "30")
-call <SID>ConditionalLet("g:localVariablesBegText",   "'Local Variables:'")
-call <SID>ConditionalLet("g:localVariablesEndText",   "'End:'")
-call <SID>ConditionalLet("g:localVariablesAllowExec", "0")
+call <SID>ConditionalLet("g:localVariablesRange",                 "30")
+call <SID>ConditionalLet("g:localVariablesBegText",               "'Local Variables:'")
+call <SID>ConditionalLet("g:localVariablesEndText",               "'End:'")
 call <SID>ConditionalLet("g:localVariablesDownCaseHyphenedNames", "1")
+
+let s:localVariablesAllowExec=1
+
+fun! <SID>LocalVariablesAskUser(prompt, default)
+    if has("gui_running")
+        let val = inputdialog(a:prompt, a:default)
+    else
+        call inputsave()
+        let val = input(a:prompt, a:default)
+        call inputrestore()
+    endif
+    return val
+endfun
+
+if s:localVariablesAllowExec >= 1
+    fun! <SID>LocalVariablesAllowSpecial(class, value)
+        let force = (a:value =~? 'localVariables\|system')
+        if s:localVariablesAllowExec > 0
+            if !force && s:localVariablesAllowExec == 3
+                return 1
+            else
+                let default = s:localVariablesAllowExec == 2 ? "y" : "n"
+                let options = s:localVariablesAllowExec == 2 ? "(Y/n)" : "(y/N)"
+                return <SID>LocalVariablesAskUser("LocalVariables: Allow ". a:class ." '".a:value."'? ".
+                            \ options, default) ==? "y"
+            endif
+        else
+            return 0
+        endif
+    endfun
+    fun! <SID>LocalVariablesExecute(cmd)
+        exec a:cmd
+    endfun
+    fun! LocalVariablesAppendEvent(event, value)
+        if !exists("b:LocalVariables". a:event)
+            let pre = ""
+        else
+            let pre = b:LocalVariables{a:event} ."|"
+        endif
+        exe "let b:LocalVariables". a:event .' = "'. escape(pre, '"') . escape(a:value, '"') .'"'
+    endfun
+else
+    fun! <SID>LocalVariablesAllowSpecial(class, value)
+        return 0
+    endfun
+    fun! <SID>LocalVariablesExecute(cmd)
+        echomsg "LocalVariables: Disabled: ".a:cmd
+    endfun
+    fun! LocalVariablesAppendEvent(event, value)
+        echomsg "LocalVariables: Disabled Event Handling: ".a:event."=".a:value
+    endfun
+endif
 
 fun! <SID>LocalVariablesSet(line, prefix, suffix)
     let l:scope     = ""
@@ -98,7 +83,7 @@ fun! <SID>LocalVariablesSet(line, prefix, suffix)
         let l:scopeEnd = l:prefixEnd
     endif
     
-    let l:varEnd = matchend(a:line, ".\\+:", l:scopeEnd)
+    let l:varEnd = matchend(a:line, '.\{-}:', l:scopeEnd)
     if l:varEnd >= 0
         let l:var = strpart(a:line, l:scopeEnd, l:varEnd-l:scopeEnd-1)
         if l:var =~ "-"
@@ -122,15 +107,22 @@ fun! <SID>LocalVariablesSet(line, prefix, suffix)
     
     let l:valLen = strlen(a:line) - l:varEnd - strlen(a:suffix)
     if l:valLen > 0
-        let l:value = strpart(a:line, l:varEnd, l:valLen)
+        let l:value = substitute(strpart(a:line, l:varEnd, l:valLen), '^\s\+', "", "")
     else
         throw "Local Variables: No value given for ".l:var
     endif
     
     if l:scope == "::"
         if l:var =~ "^\\cexec\\(u\\(t\\(e\\)\\?\\)\\?\\)\\?$"
-            if g:localVariablesAllowExec
-                exe l:value
+            if <SID>LocalVariablesAllowSpecial("execute", l:value)
+                call <SID>LocalVariablesExecute(l:value)
+            else
+                echomsg "Local Variables: Disabled: ".l:value
+            endif
+        elseif l:var =~? '^On.\+'
+            let event = matchstr(l:var, '\c^On\zs.\+')
+            if <SID>LocalVariablesAllowSpecial(event, l:value)
+                call LocalVariablesAppendEvent(event, l:value)
             else
                 echomsg "Local Variables: Disabled: ".l:value
             endif
@@ -139,50 +131,59 @@ fun! <SID>LocalVariablesSet(line, prefix, suffix)
         endif
     elseif l:scope ==# "X"
         call LocalVariableX{l:var}(l:value)
-    elseif l:var ==# "localVariablesAllowExec"
+    elseif l:var =~# "localVariablesAllowExec"
         throw "Local Variables: Can't set: ".l:var
-    elseif l:scope ==# "&:"
-        exe "set ".l:var."=".l:value
     else
-        exe "let ".l:scope.l:var." = ".l:value
+        if l:scope ==# "&:"
+            exe 'setlocal '.l:var.'='.l:value
+        else
+            if !(l:value =~ "^\\([\"']\\)[^\"]*\\1$")
+                let l:value = '"'.escape(l:value, '"\').'"'
+            endif
+            exe 'let '.l:scope.l:var.' = '.l:value
+        endif
     endif
 endfun
 
+fun! <SID>LocalVariablesSearch(repos)
+    if a:repos
+        let l:currline  = line(".")
+        let l:currcol  = col(".")
+    endif
+    let l:startline = line("$") - g:localVariablesRange
+    call cursor(l:startline, 1)
+    let l:rv = search("\\V\\C\\^\\(\\.\\*\\)". g:localVariablesBegText ."\\(\\.\\*\\)\\n\\(\\_^\\1\\.\\+:\\.\\+\\2\\n\\)\\*\\_^\\1". g:localVariablesEndText ."\\2\\$", "W")
+    if a:repos
+        call cursor(l:currline, l:currcol)
+    endif
+    return l:rv
+endfun 
+
 fun! LocalVariablesReCheck()
-    let l:count    = 0
-    let l:found    = 0
-    let l:lvend    = 0
-    let l:prefix   = ""
-    let l:suffix   = ""
-    let l:maxlines = line("$")
-    while l:count < g:localVariablesRange
-        let l:line = getline(l:maxlines - l:count)
-        if !l:lvend
-            let l:locVarEndPos = match(l:line, "\\V\\C".g:localVariablesEndText)
-            if l:locVarEndPos >= 0
-                let l:prefix = strpart(l:line, 0, l:locVarEndPos)
-                let l:suffix = strpart(l:line, l:locVarEndPos + strlen(g:localVariablesEndText))
-                let l:lvend  = 1
-            endif
-        elseif l:line ==# l:prefix.g:localVariablesBegText.l:suffix
-            let l:found = 1
-            break
+    let l:currline = line(".")
+    let l:currcol  = col(".")
+    let l:pos = <SID>LocalVariablesSearch(0)
+    if l:pos
+        let l:line = getline(l:pos)
+        let l:locVarBegPos = match(l:line, "\\V\\C".g:localVariablesBegText)
+        if l:locVarBegPos >= 0
+            let l:prefix = strpart(l:line, 0, l:locVarBegPos)
+            let l:suffix = strpart(l:line, l:locVarBegPos + strlen(g:localVariablesBegText))
+        else
+            throw "Local Variables: Parsing error (please report)"
         endif
-        let l:count = l:count + 1
-    endwh
-    if l:found
-        let l:line = getline(l:maxlines - l:count)
-        while l:count > 0
-            let l:count = l:count - 1
-            let l:line = getline(l:maxlines - l:count)
-            if l:line ==# l:prefix.g:localVariablesEndText.l:suffix
-                break
-            else
-                call <SID>LocalVariablesSet(l:line, l:prefix, l:suffix)
-            endif
+        let l:endPos = search("\\V\\C\\^"
+                    \ . substitute(l:prefix, "\\", "\\\\\\\\", "g")
+                    \ . g:localVariablesEndText
+                    \ . substitute(l:suffix, "\\", "\\\\\\\\", "g")
+                    \ . "\\$", "W") - 1
+        while l:pos < l:endPos
+            let l:pos = l:pos + 1
+            call <SID>LocalVariablesSet(getline(l:pos), l:prefix, l:suffix)
         endwh
     endif
     let b:localVariablesChecked = 1
+    call cursor(l:currline, l:currcol)
 endfun
 
 fun! LocalVariablesCheck()
@@ -190,4 +191,31 @@ fun! LocalVariablesCheck()
         call LocalVariablesReCheck()
     endif
 endfun
+
+fun! LocalVariablesRunEventHook(event)
+    if exists("b:LocalVariables". a:event)
+        exe b:LocalVariables{a:event}
+    endif
+endfun
+
+fun! LocalVariablesRegisterHook(event, bang)
+    if exists("b:LocalVariablesRegisteredHooks")
+        if (b:LocalVariablesRegisteredHooks =~? "|". a:event ."|")
+            if !(a:bang == "!")
+                throw "Local Variables: Already registered for ". a:event
+            else
+                return
+            endif
+        else
+            let b:LocalVariablesRegisteredHooks = b:LocalVariablesRegisteredHooks . a:event ."|"
+        endif
+    else
+        let b:LocalVariablesRegisteredHooks = "|". a:event ."|"
+    endif
+    exe "au ". a:event ." * call LocalVariablesRunEventHook('". a:event ."')"
+endfun
+
+command! LocalVariablesReCheck call LocalVariablesReCheck()
+" command! -nargs=1 LocalVariablesRunEventHook call LocalVariablesRunEventHook(<q-args>)
+command! -nargs=1 -bang LocalVariablesRegisterHook call LocalVariablesRegisterHook(<q-args>, <q-bang>)
 
